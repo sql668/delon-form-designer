@@ -1,1 +1,10 @@
 /* You can add global styles to this file, and also import other style files */
+/* src/styles.scss */
+
+/* 1. 引入 NG-ZORRO 核心样式 (必须) */
+@import 'ng-zorro-antd/ng-zorro-antd.min.css';
+
+/* 2. 如果你使用了 Delon Theme，也建议引入 */
+//@import '@delon/theme/index.min.css';
+
+/* 3. 确保 Tailwind 或其他工具类样式（如果用了）在正确位置 */

@@ -1,19 +1,9 @@
 import { NgModule } from '@angular/core';
-import { BrowserModule } from '@angular/platform-browser';
-
-import { AppComponent } from './app.component';
-import { NZ_I18N } from 'ng-zorro-antd/i18n';
-import { zh_CN } from 'ng-zorro-antd/i18n';
-import { registerLocaleData } from '@angular/common';
-import zh from '@angular/common/locales/zh';
-import { FormsModule, ReactiveFormsModule } from '@angular/forms';
-import { HttpClientModule } from '@angular/common/http';
-import { BrowserAnimationsModule } from '@angular/platform-browser/animations';
-
-
-// 关键导入
+import { CommonModule } from '@angular/common';
+import { ReactiveFormsModule,FormsModule } from '@angular/forms';
 import { DelonFormModule } from '@delon/form';
 
+// NG-ZORRO Imports
 import { NzAutocompleteModule } from 'ng-zorro-antd/auto-complete';
 import { NzButtonModule } from 'ng-zorro-antd/button';
 import { NzCardModule } from 'ng-zorro-antd/card';
@@ -39,27 +29,22 @@ import { NzTransferModule } from 'ng-zorro-antd/transfer';
 import { NzTreeSelectModule } from 'ng-zorro-antd/tree-select';
 import { NzUploadModule } from 'ng-zorro-antd/upload';
 import { NzMessageModule } from 'ng-zorro-antd/message';
+import { NzDividerModule } from 'ng-zorro-antd/divider';
 
-import { FormDesignerModule } from './form-designer/form-designer.module';
-
-// 引入我们将要创建的设计器模块
-//import { FormDesignerModule } from './form-designer/form-designer.module';
+// NG-ZORRO Imports
+import { FormDesignerComponent } from './form-designer.component';
+import { PropertyPanelComponent } from './property-panel.component';
 
 import { DragDropModule } from '@angular/cdk/drag-drop';
 
 
-registerLocaleData(zh);
 
 @NgModule({
-  declarations: [AppComponent],
+  declarations: [FormDesignerComponent, PropertyPanelComponent],
   imports: [
-    BrowserModule,
-    FormsModule,
-    HttpClientModule,
-    BrowserAnimationsModule,
-    // 导入 Delon Form 模块 (forRoot)
-    DelonFormModule.forRoot(),
-    // 导入 NG-ZORRO 组件
+    CommonModule,
+    ReactiveFormsModule, FormsModule,
+    DelonFormModule,
     NzAutocompleteModule,
     NzCardModule,
     NzCheckboxModule,
@@ -67,31 +52,15 @@ registerLocaleData(zh);
     NzCheckboxModule,
     NzDatePickerModule,
     NzInputModule,
-    NzButtonModule,
+    NzDividerModule,
+    NzButtonModule, NzGridModule, NzInputNumberModule, NzMentionModule, NzModalModule, NzRadioModule, NzRateModule, NzSelectModule, NzTagModule, NzTimePickerModule, NzToolTipModule, NzTransferModule, NzTreeSelectModule, NzUploadModule, NzMessageModule, NzIconModule, NzSliderModule,
     NzSwitchModule,
     NzSliderModule,
-    NzSelectModule,
-    NzIconModule,
-    NzInputNumberModule,
-    NzMentionModule,
-    NzModalModule,
-    NzRateModule,
-    NzTagModule,
-    NzTimePickerModule,
-    NzToolTipModule,
-    NzTransferModule,
-    NzTreeSelectModule,
-    NzUploadModule,
-    NzRadioModule,
-    NzMessageModule,
-    NzGridModule,
+    NzButtonModule,
     NzFormModule,
-    ReactiveFormsModule,
-    // 导入设计器模块
-    FormDesignerModule,
+    NzIconModule,
     DragDropModule,
   ],
-  providers: [{ provide: NZ_I18N, useValue: zh_CN }],
-  bootstrap: [AppComponent],
+  exports: [FormDesignerComponent],
 })
-export class AppModule {}
+export class FormDesignerModule {}
