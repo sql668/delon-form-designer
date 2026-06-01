@@ -2,6 +2,7 @@ import { Component, OnInit } from '@angular/core';
 import { CdkDragDrop } from '@angular/cdk/drag-drop';
 import { FormDesignerService, DesignerNode } from './form-designer.service';
 import { SFSchema, SFUISchema } from '@delon/form';
+import { NzMessageService } from 'ng-zorro-antd/message'; // 引入消息服务
 
 @Component({
   selector: 'app-form-designer',
@@ -37,6 +38,19 @@ import { SFSchema, SFUISchema } from '@delon/form';
 
       <!-- 中间：画布 -->
       <div class="main-canvas">
+        <!-- 【新增】顶部操作区 -->
+        <div class="canvas-toolbar">
+          <button nz-button nzType="default" (click)="saveSchema()">
+            <i nz-icon nzType="save"></i> 保存
+          </button>
+          <button nz-button nzType="primary" (click)="openPreview()">
+            <i nz-icon nzType="eye"></i> 预览
+          </button>
+          <button nz-button nzType="default" (click)="publishSchema()">
+            <i nz-icon nzType="cloud-upload"></i> 发布
+          </button>
+        </div>
+
         <div class="canvas-wrapper">
           <div class="canvas-header">
             <h2>表单画布</h2>
@@ -90,7 +104,7 @@ import { SFSchema, SFUISchema } from '@delon/form';
                 <span class="required" *ngIf="isRequired(node.key)">*</span>
               </label>
 
-              <!-- 真实 SF 预览 -->
+              <!-- 真实 SF 预览 (设计态，禁用交互) -->
               <div class="sf-wrapper">
                 <sf
                   [schema]="node.previewSchema"
@@ -120,9 +134,47 @@ import { SFSchema, SFUISchema } from '@delon/form';
         <app-property-panel></app-property-panel>
       </div>
     </div>
+
+    <!-- 【新增】预览弹窗 -->
+    <nz-modal
+      [(nzVisible)]="isPreviewVisible"
+      nzTitle="表单预览"
+      nzWidth="800px"
+      (nzOnCancel)="closePreview()"
+      [nzFooter]="modalFooter"
+    >
+      <ng-container *nzModalContent>
+        <div class="preview-modal-content">
+          <!-- 修复1: 使用单向绑定 [formData]，避免双向绑定报错 -->
+          <sf
+            [schema]="schema"
+            [ui]="ui"
+            [formData]="previewFormData"
+            (formChange)="onPreviewFormChange($event)"
+            (formSubmit)="onPreviewSubmit($event)"
+          >
+            <!-- 修复2: 将 #sf-button 改为 #sfButton (去除连字符) -->
+            <ng-template #sfButton>
+              <button nz-button nzType="primary" type="submit">提交测试</button>
+            </ng-template>
+          </sf>
+        </div>
+      </ng-container>
+
+      <!-- 自定义底部按钮 -->
+      <ng-template #modalFooter>
+        <button nz-button nzType="default" (click)="closePreview()">
+          关闭
+        </button>
+        <button nz-button nzType="primary" (click)="triggerPreviewSubmit()">
+          触发提交
+        </button>
+      </ng-template>
+    </nz-modal>
   `,
   styles: [
     `
+      /* ... 保持之前的样式不变 ... */
       .designer-container {
         display: flex;
         height: 100vh;
@@ -172,6 +224,7 @@ import { SFSchema, SFUISchema } from '@delon/form';
         margin-right: 8px;
         font-size: 16px;
       }
+
       .main-canvas {
         flex: 1;
         display: flex;
@@ -179,6 +232,19 @@ import { SFSchema, SFUISchema } from '@delon/form';
         overflow: hidden;
         background: #f9fafb;
       }
+
+      /* 新增：顶部工具栏样式 */
+      .canvas-toolbar {
+        height: 50px;
+        background: white;
+        border-bottom: 1px solid #e5e7eb;
+        display: flex;
+        align-items: center;
+        padding: 0 16px;
+        gap: 12px;
+        flex-shrink: 0;
+      }
+
       .canvas-wrapper {
         flex: 1;
         overflow-y: auto;
@@ -237,7 +303,6 @@ import { SFSchema, SFUISchema } from '@delon/form';
         border-color: #3b82f6;
         box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
       }
-
       .item-actions {
         position: absolute;
         top: -12px;
@@ -252,13 +317,11 @@ import { SFSchema, SFUISchema } from '@delon/form';
         gap: 4px;
       }
 
-      /* SF 预览区域样式优化 */
       .sf-wrapper {
         position: relative;
         z-index: 1;
         margin-top: 8px;
       }
-      /* 禁用 SF 内部控件的交互，防止点击输入框时触发焦点而不是选中卡片 */
       .sf-wrapper ::ng-deep .ant-input,
       .sf-wrapper ::ng-deep .ant-select-selector,
       .sf-wrapper ::ng-deep .ant-picker,
@@ -285,8 +348,6 @@ import { SFSchema, SFUISchema } from '@delon/form';
         color: #ef4444;
         margin-left: 4px;
       }
-
-      /* 拖拽手柄样式 */
       .drag-handle {
         position: absolute;
         left: -28px;
@@ -327,8 +388,6 @@ import { SFSchema, SFUISchema } from '@delon/form';
       .json-preview pre {
         margin: 0;
       }
-
-      /* CDK 拖拽辅助样式 */
       .cdk-drag-placeholder {
         opacity: 0.4;
         border: 2px dashed #3b82f6;
@@ -342,6 +401,14 @@ import { SFSchema, SFUISchema } from '@delon/form';
       .cdk-drag-animating {
         transition: transform 250ms cubic-bezier(0, 0, 0.2, 1);
       }
+
+      /* 预览弹窗样式 */
+      .preview-modal-content {
+        max-height: 70vh;
+        overflow-y: auto;
+        padding: 20px;
+        background: #fff;
+      }
     `,
   ],
 })
@@ -350,6 +417,10 @@ export class FormDesignerComponent implements OnInit {
   ui: SFUISchema = {};
   nodes: DesignerNode[] = [];
   selectedId: string | null = null;
+
+  // 预览相关状态
+  isPreviewVisible = false;
+  previewFormData: any = {};
 
   widgets = [
     { type: 'string', label: '文本输入', icon: 'font-size' },
@@ -360,11 +431,17 @@ export class FormDesignerComponent implements OnInit {
     { type: 'textarea', label: '多行文本', icon: 'enter' },
   ];
 
-  constructor(private designerService: FormDesignerService) {}
+  constructor(
+    private designerService: FormDesignerService,
+    private message: NzMessageService, // 注入消息服务
+  ) {}
 
   ngOnInit(): void {
     this.designerService.schema$.subscribe((s) => (this.schema = s));
-    this.designerService.uiSchema$.subscribe((u) => (this.ui = u));
+    this.designerService.uiSchema$.subscribe((u) => {
+      console.log('UI Schema:', u);
+      this.ui = u;
+    });
     this.designerService.nodes$.subscribe((n) => (this.nodes = n));
     this.designerService.selectedId$.subscribe((id) => (this.selectedId = id));
   }
@@ -394,23 +471,52 @@ export class FormDesignerComponent implements OnInit {
     return !!this.schema.required?.includes(key);
   }
 
-  // 生成单字段 Schema
-  getNodeSchemaObj(node: DesignerNode): SFSchema {
-    return {
-      properties: {
-        [node.key]: this.schema.properties?.[node.key] || {},
-      },
-    };
-  }
-
-  // 生成单字段 UI
-  getNodeUiObj(node: DesignerNode): SFUISchema {
-    return {
-      [node.key]: this.ui[node.key] || {},
-    };
-  }
-
   isHiddenLabel(type: string): boolean {
     return type === 'boolean';
+  }
+
+  // --- 新增：操作栏逻辑 ---
+
+  saveSchema() {
+    console.log('Saving Schema:', this.schema, this.ui);
+    this.message.success('Schema 已保存到控制台 (模拟)');
+    // 在这里调用你的后端 API 保存 schema 和 ui
+  }
+
+  publishSchema() {
+    console.log('Publishing Schema...');
+    this.message.loading('正在发布...');
+    setTimeout(() => {
+      this.message.success('发布成功 (模拟)');
+    }, 1000);
+  }
+
+  openPreview() {
+    console.log('Opening Preview...');
+    console.log('Preview Schema:', this.schema, this.ui);
+    this.previewFormData = {}; // 重置表单数据
+    this.isPreviewVisible = true;
+  }
+
+  closePreview() {
+    this.isPreviewVisible = false;
+  }
+
+  onPreviewFormChange(value: any) {
+    // 实时监听表单变化，可用于调试联动
+    // console.log('Preview Form Changed:', value);
+  }
+
+  onPreviewSubmit(value: any) {
+    console.log('Preview Form Submitted:', value);
+    this.message.success('表单提交成功！数据见控制台');
+  }
+
+  triggerPreviewSubmit() {
+    // 通过 NZ-MODAL 的 footer 按钮触发表单提交
+    // 注意：SF 组件的提交通常需要点击内部的 submit 按钮，或者调用 SF 实例的 submit 方法
+    // 这里简单起见，我们依赖 SF 内部的校验和提交逻辑
+    // 如果需要更精细控制，可以使用 @ViewChild 获取 SF 实例并调用 .submit()
+    this.message.info('请点击表单底部的“提交测试”按钮进行正式提交');
   }
 }

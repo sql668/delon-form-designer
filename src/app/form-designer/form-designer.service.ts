@@ -11,7 +11,6 @@ export interface DesignerNode {
   title: string;
   schema: any;
   ui: any;
-  // 缓存用于预览的完整对象，避免模板中频繁创建新对象导致死循环
   previewSchema: SFSchema;
   previewUi: SFUISchema;
 }
@@ -20,7 +19,6 @@ export interface DesignerNode {
   providedIn: 'root',
 })
 export class FormDesignerService {
-  // ... (Subject 定义保持不变) ...
   private schemaSubject = new BehaviorSubject<SFSchema>({ properties: {} });
   private uiSchemaSubject = new BehaviorSubject<SFUISchema>({});
   private nodesSubject = new BehaviorSubject<DesignerNode[]>([]);
@@ -46,16 +44,14 @@ export class FormDesignerService {
     const key = `field_${id.substring(0, 8)}`;
     const title = this.getDefaultTitle(type);
 
+    // 1. Schema Part
     const schemaPart: any = { type: this.getSchemaType(type), title: title };
     if (type === 'date') schemaPart.format = 'date';
     if (type === 'select') schemaPart.enum = ['选项1', '选项2', '选项3'];
 
+    // 2. UI Part (注意：这里只是配置内容，Key 在存入 ui 对象时再加 $)
     const uiPart: any = { widget: this.getWidgetType(type) };
     if (type === 'textarea') uiPart.rows = 3;
-
-    // 创建缓存的预览对象
-    const previewSchema: SFSchema = { properties: { [key]: schemaPart } };
-    const previewUi: SFUISchema = { [key]: uiPart };
 
     const newNode: DesignerNode = {
       id,
@@ -64,8 +60,9 @@ export class FormDesignerService {
       title,
       schema: schemaPart,
       ui: uiPart,
-      previewSchema,
-      previewUi,
+      previewSchema: { properties: { [key]: schemaPart } },
+      // 【关键】previewUi 的 Key 必须带 $
+      previewUi: { ['$' + key]: uiPart },
     };
 
     const schema = this.currentSchema;
@@ -73,6 +70,8 @@ export class FormDesignerService {
     const nodes = this.currentNodes;
 
     if (!schema.properties) schema.properties = {};
+
+    // 保持 properties 顺序
     const newProperties: any = {};
     nodes.forEach((n) => {
       if ((schema.properties as any)[n.key])
@@ -80,9 +79,14 @@ export class FormDesignerService {
     });
     newProperties[key] = schemaPart;
     schema.properties = newProperties;
-    ui[key] = uiPart;
+
+    // 【关键】存入 UI Schema 时，Key 必须带 $
+    ui['$' + key] = uiPart;
+
     nodes.push(newNode);
 
+    // 更新 Order
+    this.updateOrderInUI(schema, ui, nodes);
     this.updateAll(schema, ui, nodes);
     this.selectNode(id);
   }
@@ -103,10 +107,6 @@ export class FormDesignerService {
     newSchema.title = `${newSchema.title} (副本)`;
     const newUi = _.cloneDeep(sourceNode.ui);
 
-    // 创建新的缓存预览对象
-    const previewSchema: SFSchema = { properties: { [newKey]: newSchema } };
-    const previewUi: SFUISchema = { [newKey]: newUi };
-
     const newNode: DesignerNode = {
       id: newId,
       key: newKey,
@@ -114,8 +114,9 @@ export class FormDesignerService {
       title: newSchema.title,
       schema: newSchema,
       ui: newUi,
-      previewSchema,
-      previewUi,
+      previewSchema: { properties: { [newKey]: newSchema } },
+      // 【关键】previewUi 的 Key 必须带 $
+      previewUi: { ['$' + newKey]: newUi },
     };
 
     nodes.splice(index + 1, 0, newNode);
@@ -125,8 +126,11 @@ export class FormDesignerService {
       newProperties[n.key] = (schema.properties as any)[n.key];
     });
     schema.properties = newProperties;
-    ui[newKey] = newUi;
 
+    // 【关键】存入 UI Schema 时，Key 必须带 $
+    ui['$' + newKey] = newUi;
+
+    this.updateOrderInUI(schema, ui, nodes);
     this.updateAll(schema, ui, nodes);
     this.selectNode(newId);
   }
@@ -140,11 +144,15 @@ export class FormDesignerService {
     const ui = this.currentUISchema;
 
     if (schema.properties) delete (schema.properties as any)[node.key];
-    delete ui[node.key];
+
+    // 【关键】删除 UI Schema 时，Key 必须带 $
+    delete ui['$' + node.key];
+
     if (schema.required)
       schema.required = schema.required.filter((k) => k !== node.key);
 
     nodes.splice(index, 1);
+    this.updateOrderInUI(schema, ui, nodes);
     this.updateAll(schema, ui, nodes);
     this.selectNode(null);
   }
@@ -161,7 +169,9 @@ export class FormDesignerService {
     });
     schema.properties = newProperties;
 
-    this.updateAll(schema, this.currentUISchema, nodes);
+    const ui = this.currentUISchema;
+    this.updateOrderInUI(schema, ui, nodes);
+    this.updateAll(schema, ui, nodes);
   }
 
   updateFieldConfig(
@@ -175,63 +185,94 @@ export class FormDesignerService {
     const ui = this.currentUISchema;
     const key = node.key;
 
-    // 1. 更新全局 Schema
+    // 【关键】UI Schema 的 Key 必须带 $
+    const uiKey = '$' + key;
+
+    // 1. Update Schema
     if (updates.schema && schema.properties) {
-      // 注意：这里必须生成新对象，或者确保 delon form 能检测到内部变化
-      // 为了保险，我们直接替换 properties 中的该项
       (schema.properties as any)[key] = {
         ...(schema.properties as any)[key],
-        ...updates.schema
+        ...updates.schema,
       };
-
-      // 同步更新 node 中的引用
       node.schema = (schema.properties as any)[key];
       if (updates.schema.title) node.title = updates.schema.title;
     }
 
-     // 2. 更新 Required
+    // 2. Update Required
     if (updates.required !== undefined) {
       let req = [...(schema.required || [])];
       if (updates.required && !req.includes(key)) req.push(key);
-      else if (!updates.required && req.includes(key)) req = req.filter((k) => k !== key);
+      else if (!updates.required && req.includes(key))
+        req = req.filter((k) => k !== key);
       schema.required = req.length > 0 ? req : undefined;
     }
 
-
-    // 3. 更新全局 UI
+    // 3. Update UI
     if (updates.ui) {
-      if (!ui[key]) ui[key] = {};
-      ui[key] = { ...ui[key], ...updates.ui };
-      node.ui = ui[key];
+      if (!ui[uiKey]) ui[uiKey] = {};
+
+      Object.keys(updates.ui).forEach((prop) => {
+        const value = updates.ui[prop];
+        if (value === undefined) delete ui[uiKey][prop];
+        else ui[uiKey][prop] = value;
+      });
+
+      node.ui = ui[uiKey];
     }
 
-    // 4. 【关键】刷新缓存的预览对象引用
-    // 必须创建新的对象实例，这样 <sf> 组件的 ngOnChanges 才能检测到变化并重新渲染
+    // 4. Refresh Preview Cache
     node.previewSchema = {
-      properties: { [key]: (schema.properties as any)[key] }
+      properties: { [key]: (schema.properties as any)[key] },
     };
-    node.previewUi = {
-      [key]: ui[key]
-    };
-    //this.updateAll(schema, ui, this.currentNodes);
+    // 【关键】previewUi 的 Key 必须带 $
+    node.previewUi = { [uiKey]: { ...ui[uiKey] } };
 
-    // 5. 触发 BehaviorSubject 更新
-    // 注意：nodesSubject 需要发出新数组引用，或者至少确保节点内部引用已变
-    // 由于我们直接修改了 node 对象的属性，对于 BehaviorSubject 来说，
-    // 如果只调用 next([...nodes]) 可能不够，因为 nodes 里的对象引用没变。
-    // 但因为我们修改了 node.previewSchema 的引用，Angular 的模板绑定会检测到。
-
-    // 为了确保万无一失，我们重新发出所有 Subject
+    // 5. Emit Changes
     this.schemaSubject.next(_.cloneDeep(schema));
     this.uiSchemaSubject.next(_.cloneDeep(ui));
-
-    // 对于 nodes，由于我们是原地修改了 node 的属性，我们需要发出一个新数组
-    // 以触发 ngFor 的变更检测（虽然 ngFor 默认是按引用比较，但内部属性变化通常需要 OnPush 或显式触发）
-    // 如果组件没有使用 OnPush，直接修改对象属性通常能生效。
-    // 但为了触发 <sf> 的更新，关键在于 node.previewSchema 指向了新对象。
-
     this.nodesSubject.next([...this.currentNodes]);
+  }
 
+  renameKey(id: string, newKey: string) {
+    const node = this.currentNodes.find((n) => n.id === id);
+    if (!node || node.key === newKey) return;
+    if (this.currentNodes.some((n) => n.key === newKey))
+      throw new Error(`Key "${newKey}" exists.`);
+
+    const oldKey = node.key;
+    const schema = this.currentSchema;
+    const ui = this.currentUISchema;
+    const nodes = this.currentNodes;
+
+    // Migrate Schema
+    if (schema.properties) {
+      const oldSchema = (schema.properties as any)[oldKey];
+      delete (schema.properties as any)[oldKey];
+      (schema.properties as any)[newKey] = oldSchema;
+    }
+
+    // Migrate UI (Key with $)
+    const oldUiKey = '$' + oldKey;
+    const newUiKey = '$' + newKey;
+    const oldUi = ui[oldUiKey];
+    delete ui[oldUiKey];
+    ui[newUiKey] = oldUi;
+
+    // Migrate Required
+    if (schema.required) {
+      const idx = schema.required.indexOf(oldKey);
+      if (idx !== -1) schema.required[idx] = newKey;
+    }
+
+    // Update Node
+    node.key = newKey;
+    node.previewSchema = {
+      properties: { [newKey]: (schema.properties as any)[newKey] },
+    };
+    node.previewUi = { [newUiKey]: ui[newUiKey] };
+
+    this.updateOrderInUI(schema, ui, nodes);
+    this.updateAll(schema, ui, nodes);
   }
 
   selectNode(id: string | null) {
@@ -278,11 +319,21 @@ export class FormDesignerService {
       case 'select':
         return 'select';
       case 'boolean':
-        return 'checkbox';
+        return 'boolean';
       case 'number':
         return 'input-number';
       default:
         return 'string';
     }
+  }
+
+  private updateOrderInUI(
+    schema: SFSchema,
+    ui: SFUISchema,
+    nodes: DesignerNode[],
+  ) {
+    const orderKeys = nodes.map((n) => n.key); // Order 数组里存的是原始 Key
+    if (!ui['*']) ui['*'] = {};
+    ui['*'].order = orderKeys;
   }
 }
